@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AuditField">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Audit Field Tool</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-title">⚡ Audit Field Tool</div>
+  <div class="header-sub" id="header-sub">No customer loaded</div>
+</header>
+
+<!-- TAB NAV -->
+<nav class="tabnav">
+  <button class="tab active" data-tab="voice">📋 Audit Data</button>
+  <button class="tab" data-tab="tc">✍️ T&C</button>
+  <button class="tab" data-tab="photos">📷 Photos</button>
+  <button class="tab" data-tab="audits">📁 Audits</button>
+  <button class="tab" data-tab="export">📤 Export</button>
+</nav>
+
+<!-- ======================== T&C TAB ======================== -->
+<div id="tab-tc" class="tabpanel" style="display:none">
+
+  <section class="card">
+    <div class="card-title">📋 Terms & Conditions — CHESS Program</div>
+    <div class="card-sub">Customer info auto-populated from Voice tab. Collect signature below then generate PDF.</div>
+    <div class="tc-info-grid">
+      <div class="tc-info-row">
+        <span class="tc-info-label">Name</span>
+        <span class="tc-info-value" id="tc-name-display">—</span>
+      </div>
+      <div class="tc-info-row">
+        <span class="tc-info-label">Address</span>
+        <span class="tc-info-value" id="tc-address-display">—</span>
+      </div>
+      <div class="tc-info-row">
+        <span class="tc-info-label">Date</span>
+        <span class="tc-info-value" id="tc-date-display">—</span>
+      </div>
+    </div>
+    <div id="tc-no-customer-msg" class="tc-warn" style="display:none;">
+      ⚠️ No customer loaded — go to Voice tab and fill in customer info first.
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Customer Signature</div>
+    <div class="card-sub">Tap the button below to open the signature screen. Hand phone to customer to sign.</div>
+    <div id="tc-sig-preview" class="sig-preview-box" style="display:none;">
+      <img id="tc-sig-preview-img" src="" alt="Signature preview" style="max-width:100%; border-radius:6px;">
+      <div style="font-size:0.78rem; color:#4caf50; margin-top:6px;">✓ Signature captured</div>
+    </div>
+    <div id="tc-no-sig-msg" class="card-sub" style="color:#666;">No signature yet</div>
+    <div style="display:flex; gap:10px; margin-top:12px;">
+      <button class="btn-gold btn-full" id="tc-open-sig-btn">✍️ Open Signature Screen</button>
+      <button class="btn-sm" id="tc-sig-clear" style="display:none;">Clear</button>
+    </div>
+  </section>
+
+  <!-- FULL SCREEN SIGNATURE OVERLAY -->
+  <div id="sig-overlay" class="sig-overlay" style="display:none;">
+    <div class="sig-overlay-inner">
+      <div class="sig-overlay-title">Customer Signature</div>
+      <div class="sig-overlay-sub">Sign with your finger in the white box below</div>
+      <div class="sig-canvas-wrapper">
+        <canvas id="tc-sig-canvas" class="sig-canvas-full"></canvas>
+      </div>
+      <div class="sig-overlay-actions">
+        <button class="btn-sm" id="tc-sig-undo">↩ Undo</button>
+        <button class="btn-sm" id="tc-sig-redo-clear">🗑 Clear</button>
+        <button class="btn-gold" id="tc-sig-save-btn">✓ Save Signature</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ======================== VOICE TAB ======================== -->
+<div id="tab-voice" class="tabpanel">
+
+  <!-- CUSTOMER INFO -->
+  <section class="card">
+    <div class="card-title">Customer Info</div>
+    <div class="field-row">
+      <input class="field" id="f-name" type="text" placeholder="Customer name" autocomplete="off">
+      <input class="field" id="f-address" type="text" placeholder="Address" autocomplete="off">
+    </div>
+    <div class="field-row">
+      <input class="field" id="f-date" type="date">
+      <input class="field" id="f-year" type="text" inputmode="numeric" placeholder="Year built">
+      <input class="field" id="f-sqft" type="text" inputmode="numeric" placeholder="Sq ft">
+    </div>
+    <div class="field-row">
+      <select class="field" id="f-coop">
+        <option value="">Select Co-op...</option>
+        <option>Arkansas Valley</option>
+        <option>C&amp;L Electric</option>
+        <option>Carroll Electric</option>
+        <option>Clay County Electric</option>
+        <option>Craighead Electric</option>
+        <option>Delta Electric</option>
+        <option>Farmers Electric</option>
+        <option>First Electric</option>
+        <option>Mississippi County Electric</option>
+        <option>Ouachita Electric</option>
+        <option>Ozarks Electric</option>
+        <option>Petit Jean Electric</option>
+        <option>Rich Mountain Electric</option>
+        <option>South Central Arkansas Electric</option>
+        <option>Southwest Arkansas Electric</option>
+        <option>Verdigris Valley Electric</option>
+        <option>Woodruff Electric</option>
+      </select>
+    </div>
+  </section>
+
+  <!-- CHEAT SHEET -->
+  <section class="card">
+    <button class="cheat-toggle" id="cheat-toggle">📋 Field Cheat Sheet <span id="cheat-arrow">▼</span></button>
+    <div class="cheat-body" id="cheat-body">
+      <div class="cheat-item">1. <b>HVAC SYSTEM</b> — Type (heat pump/gas/electric)? Tonnage? Strip backup heat (stage 2)? Ecobee eligible?</div>
+      <div class="cheat-item">2. <b>SUPPLEMENTAL HEAT/COOL</b> — Wood stove? Pellet stove? Electric space heaters? Window units? How many, where?</div>
+      <div class="cheat-item">3. <b>WATER HEATER</b> — Electric or gas? Conditioned or unconditioned? Temp setting? Pipe wrap needed? (only if electric)</div>
+      <div class="cheat-item">4. <b>WATER MEASURES</b> — Aerators installed? How many? Showerheads installed? How many? Temp adjustment done?</div>
+      <div class="cheat-item">5. <b>INSULATION</b> — Type and depth in inches? Attic access location? Any tier 2 defects visible? Whole home insulation eligible?</div>
+      <div class="cheat-item">6. <b>ATTIC</b> — Attic scuttle/s — present? Do any need insulated? Attic fan present? Sealed and insulated or needs work? Belt removed/disabled?</div>
+      <div class="cheat-item">7. <b>DUCT SEALING</b> — Level 1/2/3/4? Locations — line set penetrations, return cavity, air handler, plenum, branches, boots, tab connections, etc?</div>
+      <div class="cheat-item">8. <b>AIR SEALING</b> — Level 1/2/3/4? Weatherstripping — which doors, what type? Plumbing penetrations — which rooms? Can lights? Big holes?</div>
+      <div class="cheat-item">9. <b>CONDENSER/SYSTEM CONDITION</b> — Condenser clean or needs cleaning? Any obvious HVAC issues to note?</div>
+      <div class="cheat-item">10. <b>OZARKS MEMBER?</b> — Co-op? Any program eligibility edge cases? Anything unusual about this house?</div>
+    </div>
+  </section>
+
+  <!-- RECORD BUTTON -->
+  <section class="card record-card">
+    <button class="record-btn" id="record-btn">
+      <span class="record-icon">🎙</span>
+      <span class="record-label" id="record-label">Tap to Record</span>
+    </button>
+    <div class="record-status" id="record-status">Tap the button to start your voice dump</div>
+  </section>
+
+  <!-- VOICE DUMP -->
+  <section class="card">
+    <div class="row-between">
+      <div class="card-title">Voice Dump</div>
+      <button class="btn-sm btn-danger-sm" id="voice-clear-btn">Clear</button>
+    </div>
+    <textarea class="voice-area" id="voice-dump" placeholder="Your voice dump appears here. Tap the button above to start recording. Tap again to pause. Tap again to continue — always appends to what you already said."></textarea>
+  </section>
+
+  <section class="card danger-card" style="margin-top:8px;">
+    <div class="card-title danger-title">⚠️ Reset Current Audit</div>
+    <div class="card-sub">Clears current audit only. Saved audits not affected. Export first.</div>
+    <button class="btn-danger btn-full" id="btn-reset-voice">Reset Current Audit</button>
+  </section>
+
+</div>
+
+<!-- ======================== PHOTOS TAB ======================== -->
+<div id="tab-photos" class="tabpanel" style="display:none">
+
+  <section class="card">
+    <div class="row-between">
+      <div class="photo-count-display" id="photo-count">0 / 33 photos</div>
+      <label class="btn-gold photo-label">
+        📷 Add Photo
+        <input type="file" id="photo-input" accept="image/*" capture="environment" multiple style="display:none">
+      </label>
+    </div>
+    <div class="photo-warn" id="photo-warn" style="display:none">⚠️ Approaching 33 photo limit — delete duplicates</div>
+  </section>
+
+  <div id="photo-list"></div>
+
+</div>
+
+<!-- ======================== AUDITS TAB ======================== -->
+<div id="tab-audits" class="tabpanel" style="display:none">
+
+  <section class="card">
+    <div class="card-title">Current Audit</div>
+    <div class="card-sub" id="current-audit-label">Fill in customer info on the Voice tab</div>
+    <div class="btn-stack">
+      <button class="btn-gold btn-full" id="save-btn">💾 Save Current Audit</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Saved Audits</div>
+    <div id="audits-list"><div class="empty-msg">No saved audits yet</div></div>
+  </section>
+
+</div>
+
+<!-- ======================== EXPORT TAB ======================== -->
+<div id="tab-export" class="tabpanel" style="display:none">
+
+  <div id="weekly-batches-container">
+    <!-- Rendered by JS -->
+  </div>
+
+</div>
+
+<!-- PHOTO NOTE MODAL -->
+<div id="photo-modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">📷 Photo Note</span>
+      <button class="btn-sm" id="modal-close">✕ Close</button>
+    </div>
+    <img id="modal-img" src="" alt="" class="modal-img">
+    <button class="btn-voice-note" id="note-voice-btn">🎙 Tap to Voice Note</button>
+    <textarea class="note-area" id="modal-note" placeholder="Describe what this photo shows and what needs to be done..."></textarea>
+    <div class="modal-actions">
+      <button class="btn-danger btn-half" id="modal-delete">🗑 Delete Photo</button>
+      <button class="btn-gold btn-half" id="modal-save">✓ Save Note</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast" style="display:none"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
