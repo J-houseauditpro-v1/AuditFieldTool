@@ -1313,8 +1313,8 @@ async function overlayTCPDF(name, address, date, sigDataUrl, genMsg, callback) {
         var sigDims = sigImage.scale(0.3);
         // Position signature above the signature line
         page2.drawImage(sigImage, {
-          x: 380,
-          y: height - 370,
+          x: 375,
+          y: height - 355,
           width: Math.min(sigDims.width, 180),
           height: Math.min(sigDims.height, 35),
         });
