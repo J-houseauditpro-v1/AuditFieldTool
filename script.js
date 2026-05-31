@@ -1314,7 +1314,7 @@ async function overlayTCPDF(name, address, date, sigDataUrl, genMsg, callback) {
         // Position signature above the signature line
         page2.drawImage(sigImage, {
           x: 380,
-          y: height - 385,
+          y: height - 370,
           width: Math.min(sigDims.width, 180),
           height: Math.min(sigDims.height, 35),
         });
