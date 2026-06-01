@@ -634,7 +634,7 @@ function exportPhotoPDF() {
       var photoCount = S.photos.length;
 
       S.photos.forEach(function(photo, index) {
-        if (index > 0 && yPos > pageH - 80) {
+        if (index > 0) {
           doc.addPage();
           yPos = margin;
         }
