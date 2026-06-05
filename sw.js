@@ -1,4 +1,4 @@
-const CACHE = 'aft-v5';
+const CACHE = 'aft-v6';
 const FILES = ['index.html','style.css','script.js','manifest.json'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
@@ -11,5 +11,8 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
-});
+  e.respondWith(
+  e.request.url.includes('script.js')
+    ? fetch(e.request)
+    : caches.match(e.request).then(r => r || fetch(e.request))
+);
