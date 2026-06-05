@@ -6,10 +6,96 @@
 var S = {
   name: '', address: '', date: '', year: '', sqft: '', coop: '',
   dump: '',
-  photos: [],       // [{id, dataUrl, note, ts}]
+  photos: [],       // [{id, auditId, note, ts}]
   auditId: null,
   tcSignature: null
 };
+
+// ── INDEXEDDB PHOTO STORAGE ───────────────────────────────────
+var photoDB = null;
+
+function initPhotoDB(callback) {
+  var request = indexedDB.open('AuditFieldToolDB', 1);
+
+  request.onupgradeneeded = function(e) {
+    var db = e.target.result;
+    if (!db.objectStoreNames.contains('photos')) {
+      db.createObjectStore('photos', { keyPath: 'id' });
+    }
+  };
+
+  request.onsuccess = function(e) {
+    photoDB = e.target.result;
+    if (callback) callback();
+  };
+
+  request.onerror = function(e) {
+    console.error('IndexedDB failed to open:', e);
+    if (callback) callback();
+  };
+}
+
+function savePhotoToDB(photoRecord, callback) {
+  if (!photoDB) { if (callback) callback(); return; }
+  var tx = photoDB.transaction('photos', 'readwrite');
+  var store = tx.objectStore('photos');
+  store.put(photoRecord);
+  tx.oncomplete = function() { if (callback) callback(); };
+  tx.onerror = function(e) { console.error('Photo save error:', e); if (callback) callback(); };
+}
+
+function getPhotoFromDB(id, callback) {
+  if (!photoDB) { callback(null); return; }
+  var tx = photoDB.transaction('photos', 'readonly');
+  var store = tx.objectStore('photos');
+  var request = store.get(id);
+  request.onsuccess = function() { callback(request.result || null); };
+  request.onerror = function() { callback(null); };
+}
+
+function getPhotosByAuditId(auditId, callback) {
+  if (!photoDB) { callback([]); return; }
+  var tx = photoDB.transaction('photos', 'readonly');
+  var store = tx.objectStore('photos');
+  var results = [];
+  var request = store.openCursor();
+  request.onsuccess = function(e) {
+    var cursor = e.target.result;
+    if (cursor) {
+      if (cursor.value.auditId === auditId) results.push(cursor.value);
+      cursor.continue();
+    } else {
+      callback(results);
+    }
+  };
+  request.onerror = function() { callback([]); };
+}
+
+function deletePhotosByAuditId(auditId, callback) {
+  if (!photoDB) { if (callback) callback(); return; }
+  var tx = photoDB.transaction('photos', 'readwrite');
+  var store = tx.objectStore('photos');
+  var request = store.openCursor();
+  request.onsuccess = function(e) {
+    var cursor = e.target.result;
+    if (cursor) {
+      if (cursor.value.auditId === auditId) cursor.delete();
+      cursor.continue();
+    } else {
+      if (callback) callback();
+    }
+  };
+  request.onerror = function() { if (callback) callback(); };
+}
+
+function deletePhotoFromDB(id, callback) {
+  if (!photoDB) { if (callback) callback(); return; }
+  var tx = photoDB.transaction('photos', 'readwrite');
+  var store = tx.objectStore('photos');
+  store.delete(id);
+  tx.oncomplete = function() { if (callback) callback(); };
+  tx.onerror = function() { if (callback) callback(); };
+}
 
 // ── STORAGE ──────────────────────────────────────────────────
 function load() {
@@ -40,6 +126,7 @@ function toast(msg) {
 
 // ── INIT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
+  initPhotoDB(function() {
   load();
   fillFields();
   renderHeader();
@@ -65,6 +152,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initTCTab();
   renderTCInfo();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  });
 });
 
 // ── TABS ─────────────────────────────────────────────────────
@@ -238,15 +326,30 @@ function initPhotoInput() {
   document.getElementById('photo-input').addEventListener('change', function(e) {
     var files = Array.from(e.target.files);
     var room = 33 - S.photos.length;
-    if (files.length > room) { alert('Only ' + room + ' more photos allowed (33 max).'); files = files.slice(0, room); }
+    if (files.length > room) {
+      alert('Only ' + room + ' more photos allowed (33 max).');
+      files = files.slice(0, room);
+    }
     var count = 0;
     files.forEach(function(f) {
       var r = new FileReader();
       r.onload = function(ev) {
         compressImage(ev.target.result, function(compressed) {
-          S.photos.push({ id: Date.now() + Math.random(), dataUrl: compressed, note: '', ts: new Date().toISOString() });
-          count++;
-          if (count === files.length) { save(); renderPhotoList(); }
+          var id = Date.now() + Math.random();
+          var ts = new Date().toISOString();
+          var auditId = S.auditId || ('audit-' + Date.now());
+          S.auditId = auditId;
+
+          // Save full photo to IndexedDB
+          savePhotoToDB({ id: id, auditId: auditId, dataUrl: compressed, note: '', ts: ts }, function() {
+            // Save only metadata to localStorage state
+            S.photos.push({ id: id, auditId: auditId, note: '', ts: ts });
+            count++;
+            if (count === files.length) {
+              save();
+              renderPhotoList();
+            }
+          });
         });
       };
       r.readAsDataURL(f);
@@ -270,35 +373,58 @@ function renderPhotoList() {
     return;
   }
 
-  list.innerHTML = '';
-  S.photos.forEach(function(p, i) {
-    var card = document.createElement('div');
-    card.className = 'photo-card';
-    var t = new Date(p.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    card.innerHTML =
-      '<img src="' + p.dataUrl + '" loading="lazy" alt="Photo ' + (i+1) + '">' +
-      '<div class="photo-card-body">' +
-        '<div class="photo-card-meta">Photo ' + (i+1) + ' · ' + t + '</div>' +
-        '<div class="photo-card-note' + (p.note ? '' : ' empty') + '">' + (p.note || 'No note — tap Edit to add') + '</div>' +
-        '<div class="photo-card-actions">' +
-          '<button class="btn-sm edit-photo-btn" data-id="' + p.id + '">✏️ Edit Note</button>' +
-          '<button class="btn-danger-sm del-photo-btn" data-id="' + p.id + '">🗑 Delete</button>' +
-        '</div>' +
-      '</div>';
-    list.appendChild(card);
-  });
+  list.innerHTML = '<div class="empty-msg">Loading photos...</div>';
 
-  list.querySelectorAll('.edit-photo-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() { openModal(parseFloat(btn.dataset.id)); });
-  });
-  list.querySelectorAll('.del-photo-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      if (confirm('Delete this photo?')) {
-        S.photos = S.photos.filter(function(p) { return p.id !== parseFloat(btn.dataset.id); });
-        save(); renderPhotoList();
-      }
+  var loaded = 0;
+  var photoData = {};
+
+  S.photos.forEach(function(p) {
+    getPhotoFromDB(p.id, function(record) {
+      if (record) photoData[p.id] = record.dataUrl;
+      else if (p.dataUrl) photoData[p.id] = p.dataUrl;
+      loaded++;
+      if (loaded === S.photos.length) renderPhotoCards(photoData);
     });
   });
+
+  function renderPhotoCards(photoData) {
+    list.innerHTML = '';
+    S.photos.forEach(function(p, i) {
+      var card = document.createElement('div');
+      card.className = 'photo-card';
+      var t = new Date(p.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      var dataUrl = photoData[p.id] || '';
+
+      card.innerHTML =
+        (dataUrl ? '<img src="' + dataUrl + '" loading="lazy" alt="Photo ' + (i+1) + '">' :
+          '<div style="background:#222;padding:20px;text-align:center;color:#666;">📷 Photo ' + (i+1) + '</div>') +
+        '<div class="photo-card-body">' +
+          '<div class="photo-card-meta">Photo ' + (i+1) + ' · ' + t + '</div>' +
+          '<div class="photo-card-note' + (p.note ? '' : ' empty') + '">' + (p.note || 'No note — tap Edit to add') + '</div>' +
+          '<div class="photo-card-actions">' +
+            '<button class="btn-sm edit-photo-btn" data-id="' + p.id + '">✏️ Edit Note</button>' +
+            '<button class="btn-danger-sm del-photo-btn" data-id="' + p.id + '">🗑 Delete</button>' +
+          '</div>' +
+        '</div>';
+      list.appendChild(card);
+    });
+
+    list.querySelectorAll('.edit-photo-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { openModal(parseFloat(btn.dataset.id)); });
+    });
+    list.querySelectorAll('.del-photo-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        if (confirm('Delete this photo?')) {
+          var id = parseFloat(btn.dataset.id);
+          deletePhotoFromDB(id, function() {
+            S.photos = S.photos.filter(function(p) { return p.id !== id; });
+            save();
+            renderPhotoList();
+          });
+        }
+      });
+    });
+  }
 }
 
 // ── PHOTO MODAL ───────────────────────────────────────────────
@@ -322,15 +448,29 @@ function initModal() {
   document.getElementById('modal-save').addEventListener('click', function() {
     if (modalPhotoId !== null) {
       var p = S.photos.find(function(x) { return x.id === modalPhotoId; });
-      if (p) { p.note = document.getElementById('modal-note').value; save(); renderPhotoList(); }
+      if (p) {
+        p.note = document.getElementById('modal-note').value;
+        // Sync note to IndexedDB record too
+        getPhotoFromDB(modalPhotoId, function(record) {
+          if (record) {
+            record.note = p.note;
+            savePhotoToDB(record, null);
+          }
+        });
+        save();
+        renderPhotoList();
+      }
     }
     closeModal();
   });
 
   document.getElementById('modal-delete').addEventListener('click', function() {
     if (modalPhotoId !== null && confirm('Delete this photo?')) {
-      S.photos = S.photos.filter(function(p) { return p.id !== modalPhotoId; });
-      save(); renderPhotoList(); closeModal();
+      var id = modalPhotoId;
+      deletePhotoFromDB(id, function() {
+        S.photos = S.photos.filter(function(p) { return p.id !== id; });
+        save(); renderPhotoList(); closeModal();
+      });
     }
   });
 
@@ -370,9 +510,22 @@ function openModal(id) {
   var p = S.photos.find(function(x) { return x.id === id; });
   if (!p) return;
   modalPhotoId = id;
-  document.getElementById('modal-img').src = p.dataUrl;
   document.getElementById('modal-note').value = p.note || '';
   document.getElementById('photo-modal').style.display = 'flex';
+
+  var imgEl = document.getElementById('modal-img');
+  imgEl.src = '';
+  getPhotoFromDB(id, function(record) {
+    if (record && record.dataUrl) {
+      imgEl.src = record.dataUrl;
+      imgEl.style.display = 'block';
+    } else if (p.dataUrl) {
+      imgEl.src = p.dataUrl;
+      imgEl.style.display = 'block';
+    } else {
+      imgEl.style.display = 'none';
+    }
+  });
 }
 
 function closeModal() {
@@ -395,6 +548,20 @@ function saveAudit() {
   if (!S.name && !S.dump && !S.photos.length) { toast('Nothing to save'); return; }
   var id = S.auditId || ('audit-' + Date.now());
   S.auditId = id;
+
+  // Ensure all photos have this auditId in IndexedDB
+  S.photos.forEach(function(p) {
+    if (p.auditId !== id) {
+      p.auditId = id;
+      getPhotoFromDB(p.id, function(record) {
+        if (record) {
+          record.auditId = id;
+          savePhotoToDB(record, null);
+        }
+      });
+    }
+  });
+
   var saved = getSaved();
   saveTCSignature();
   var rec = {
@@ -458,8 +625,10 @@ function loadAudit(id) {
 function deleteAudit(id) {
   setSaved(getSaved().filter(function(a) { return a.id !== id; }));
   if (S.auditId === id) { S.auditId = null; save(); }
-  renderAuditsList();
-  toast('Audit deleted');
+  deletePhotosByAuditId(id, function() {
+    renderAuditsList();
+    toast('Audit deleted');
+  });
 }
 
 function renderCurrentAuditLabel() {
@@ -663,93 +832,116 @@ function exportPhotoPDF() {
       doc.setTextColor(150, 150, 150);
       doc.text('Generated by Audit Field Tool  ·  ' + new Date().toLocaleDateString(), margin, 26);
 
-      S.photos.forEach(function(photo, index) {
-        // Every photo starts on a fresh page except the first
-        if (index > 0) {
-          doc.addPage();
-        }
+      var photoCount = S.photos.length;
+      var loadedPhotos = [];
+      var loadCount = 0;
 
-        // Fixed layout — everything fits on one page
-        var pageMargin = 14;
-        var headerH = 28; // height of black header on page 1
-        var startY = (index === 0) ? headerH + 8 : pageMargin;
-        var availH = pageH - startY - pageMargin - 30; // 30 reserved for note at bottom
-
-        // Photo number + timestamp label
-        doc.setTextColor(40, 40, 40);
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PHOTO ' + (index + 1) + ' OF ' + S.photos.length, pageMargin, startY + 5);
-
-        var t = new Date(photo.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        doc.setTextColor(150, 150, 150);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text(t, pageMargin, startY + 10);
-
-        var imgY = startY + 14;
-
-        // Image — scaled to fill available height, never overflow
-        try {
-          var imgProps = doc.getImageProperties(photo.dataUrl);
-          var maxImgW = contentW;
-          var maxImgH = availH;
-          var ratio = imgProps.width / imgProps.height;
-          var imgW = maxImgW;
-          var imgH = imgW / ratio;
-          if (imgH > maxImgH) {
-            imgH = maxImgH;
-            imgW = imgH * ratio;
-          }
-          doc.addImage(photo.dataUrl, 'JPEG', pageMargin, imgY, imgW, imgH, '', 'MEDIUM');
-          var noteY = imgY + imgH + 4;
-        } catch(e) {
-          doc.setTextColor(255, 100, 100);
-          doc.setFontSize(8);
-          doc.text('[Image could not be embedded]', pageMargin, imgY + 8);
-          var noteY = imgY + 16;
-        }
-
-        // Note box at bottom of page
-        if (photo.note) {
-          doc.setFillColor(30, 30, 30);
-          doc.setDrawColor(51, 51, 51);
-          var noteLines = doc.splitTextToSize(photo.note, contentW - 8);
-          var noteH = Math.min(noteLines.length * 5 + 6, 35); // cap note box height
-          doc.roundedRect(pageMargin, noteY, contentW, noteH, 2, 2, 'FD');
-          doc.setTextColor(204, 204, 204);
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'normal');
-          doc.text(noteLines, pageMargin + 4, noteY + 5);
-        } else {
-          doc.setTextColor(100, 100, 100);
-          doc.setFontSize(7);
-          doc.setFont('helvetica', 'italic');
-          doc.text('No note attached', pageMargin, noteY + 3);
-        }
-      });
-
-      var totalPages = doc.getNumberOfPages();
-      for (var i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setTextColor(150, 150, 150);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Page ' + i + ' of ' + totalPages, pageW - margin, pageH - 6, { align: 'right' });
+      if (photoCount === 0) {
+        if (genMsg) genMsg.style.display = 'none';
+        return;
       }
 
-      var name = (S.name || 'audit').replace(/[^a-zA-Z0-9]/g, '-');
-      var date = S.date || new Date().toISOString().split('T')[0];
-      doc.save(date + '_' + name + '-photos.pdf');
-      toast('Photo PDF exported: ' + S.photos.length + ' photos');
+      S.photos.forEach(function(photo, index) {
+        getPhotoFromDB(photo.id, function(record) {
+          loadedPhotos[index] = {
+            dataUrl: record ? record.dataUrl : null,
+            note: photo.note || (record ? record.note : ''),
+            ts: photo.ts
+          };
+          loadCount++;
+          if (loadCount === photoCount) {
+            generatePhotoPDFFromData(doc, loadedPhotos, pageW, pageH, margin, contentW, S.name, S.date, genMsg);
+          }
+        });
+      });
 
     } catch(e) {
       toast('PDF error: ' + e.message);
       console.error('PDF generation error:', e);
+      if (genMsg) genMsg.style.display = 'none';
+    }
+  }, 100);
+}
+
+function generatePhotoPDFFromData(doc, photos, pageW, pageH, margin, contentW, customerName, auditDate, genMsg) {
+  try {
+    photos.forEach(function(photo, index) {
+      if (index > 0) { doc.addPage(); }
+      var startY = (index === 0) ? 36 : margin;
+
+      doc.setTextColor(40, 40, 40);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text('PHOTO ' + (index + 1) + ' OF ' + photos.length, margin, startY + 5);
+
+      var t = new Date(photo.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.text(t, margin, startY + 10);
+
+      var imgY = startY + 14;
+
+      if (photo.dataUrl) {
+        try {
+          var imgProps = doc.getImageProperties(photo.dataUrl);
+          var availH = pageH - imgY - margin - 45;
+          var imgW = contentW;
+          var imgH = (imgProps.height * imgW) / imgProps.width;
+          if (imgH > availH) { imgW = availH * (imgProps.width / imgProps.height); imgH = availH; }
+          doc.addImage(photo.dataUrl, 'JPEG', margin, imgY, imgW, imgH, '', 'MEDIUM');
+          imgY += imgH + 4;
+        } catch(e) {
+          doc.setTextColor(150, 150, 150);
+          doc.setFontSize(9);
+          doc.text('[Image could not be embedded]', margin, imgY + 10);
+          imgY += 20;
+        }
+      } else {
+        doc.setFillColor(30, 30, 30);
+        doc.roundedRect(margin, imgY, contentW, 50, 3, 3, 'F');
+        doc.setTextColor(150, 150, 150);
+        doc.setFontSize(9);
+        doc.text('Photo not available', margin + contentW/2, imgY + 28, {align:'center'});
+        imgY += 58;
+      }
+
+      if (photo.note) {
+        doc.setFillColor(30, 30, 30);
+        doc.setDrawColor(51, 51, 51);
+        var noteLines = doc.splitTextToSize(photo.note, contentW - 8);
+        var noteH = Math.min(noteLines.length * 5 + 6, 50);
+        doc.roundedRect(margin, imgY, contentW, noteH, 2, 2, 'FD');
+        doc.setTextColor(204, 204, 204);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.text(noteLines, margin + 4, imgY + 5);
+      } else {
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'italic');
+        doc.text('No note attached', margin, imgY + 5);
+      }
+    });
+
+    var totalPages = doc.getNumberOfPages();
+    for (var i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(7);
+      doc.text('Page ' + i + ' of ' + totalPages, pageW - margin, pageH - 6, {align:'right'});
     }
 
-    if (genMsg) genMsg.style.display = 'none';
-  }, 100);
+    var name = (customerName || 'audit').replace(/[^a-zA-Z0-9]/g, '-');
+    var date = auditDate || new Date().toISOString().split('T')[0];
+    doc.save(date + '_' + name + '-photos.pdf');
+    toast('Photo PDF exported: ' + photos.length + ' photos');
+
+  } catch(e) {
+    toast('PDF error: ' + e.message);
+    console.error(e);
+  }
+  if (genMsg) genMsg.style.display = 'none';
 }
 
 // ============================================================
@@ -956,87 +1148,24 @@ function exportSavedPhotoPDF(audit, callback) {
     doc.setTextColor(150, 150, 150);
     doc.text('Generated by Audit Field Tool  ·  ' + new Date().toLocaleDateString(), margin, 26);
 
+    var photoCount = photos.length;
+    var loadedPhotos = [];
+    var loadCount = 0;
+
     photos.forEach(function(photo, index) {
-      // Every photo starts on a fresh page except the first
-      if (index > 0) {
-        doc.addPage();
-      }
-
-      // Fixed layout — everything fits on one page
-      var pageMargin = 14;
-      var headerH = 28; // height of black header on page 1
-      var startY = (index === 0) ? headerH + 8 : pageMargin;
-      var availH = pageH - startY - pageMargin - 30; // 30 reserved for note at bottom
-
-      // Photo number + timestamp label
-      doc.setTextColor(40, 40, 40);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      doc.text('PHOTO ' + (index + 1) + ' OF ' + photos.length, pageMargin, startY + 5);
-
-      var ts = photo.ts || photo.timestamp;
-      var t = new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-      doc.setTextColor(150, 150, 150);
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'normal');
-      doc.text(t, pageMargin, startY + 10);
-
-      var imgY = startY + 14;
-
-      // Image — scaled to fill available height, never overflow
-      try {
-        var imgProps = doc.getImageProperties(photo.dataUrl);
-        var maxImgW = contentW;
-        var maxImgH = availH;
-        var ratio = imgProps.width / imgProps.height;
-        var imgW = maxImgW;
-        var imgH = imgW / ratio;
-        if (imgH > maxImgH) {
-          imgH = maxImgH;
-          imgW = imgH * ratio;
+      getPhotoFromDB(photo.id, function(record) {
+        loadedPhotos[index] = {
+          dataUrl: record ? record.dataUrl : (photo.dataUrl || null),
+          note: photo.note || (record ? record.note : ''),
+          ts: photo.ts || photo.timestamp
+        };
+        loadCount++;
+        if (loadCount === photoCount) {
+          generatePhotoPDFFromData(doc, loadedPhotos, pageW, pageH, margin, contentW, c.name, c.date, null);
+          if (callback) setTimeout(callback, 200);
         }
-        doc.addImage(photo.dataUrl, 'JPEG', pageMargin, imgY, imgW, imgH, '', 'MEDIUM');
-        var noteY = imgY + imgH + 4;
-      } catch(e) {
-        doc.setTextColor(255, 100, 100);
-        doc.setFontSize(8);
-        doc.text('[Image could not be embedded]', pageMargin, imgY + 8);
-        var noteY = imgY + 16;
-      }
-
-      // Note box at bottom of page
-      if (photo.note) {
-        doc.setFillColor(30, 30, 30);
-        doc.setDrawColor(51, 51, 51);
-        var noteLines = doc.splitTextToSize(photo.note, contentW - 8);
-        var noteH = Math.min(noteLines.length * 5 + 6, 35); // cap note box height
-        doc.roundedRect(pageMargin, noteY, contentW, noteH, 2, 2, 'FD');
-        doc.setTextColor(204, 204, 204);
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.text(noteLines, pageMargin + 4, noteY + 5);
-      } else {
-        doc.setTextColor(100, 100, 100);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'italic');
-        doc.text('No note attached', pageMargin, noteY + 3);
-      }
+      });
     });
-
-    var totalPages = doc.getNumberOfPages();
-    for (var i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setTextColor(150,150,150);
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Page ' + i + ' of ' + totalPages, pageW - margin, pageH - 6, {align:'right'});
-    }
-
-    var name = (c.name || 'audit').replace(/[^a-zA-Z0-9]/g, '-');
-    var date = c.date || new Date().toISOString().split('T')[0];
-    doc.save(date + '_' + name + '-photos.pdf');
-
-    if (callback) setTimeout(callback, 200);
 
   } catch(e) {
     toast('PDF error: ' + e.message);
