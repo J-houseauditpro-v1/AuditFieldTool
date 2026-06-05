@@ -13,44 +13,89 @@ var S = {
 
 // ── INDEXEDDB PHOTO STORAGE ───────────────────────────────────
 var photoDB = null;
+var photoDBReady = false;
 
 function initPhotoDB(callback) {
+  console.log('[PhotoDB] Opening IndexedDB...');
   var request = indexedDB.open('AuditFieldToolDB', 1);
 
   request.onupgradeneeded = function(e) {
     var db = e.target.result;
     if (!db.objectStoreNames.contains('photos')) {
       db.createObjectStore('photos', { keyPath: 'id' });
+      console.log('[PhotoDB] Created photos object store');
     }
+  };
+
+  request.onblocked = function() {
+    console.warn('[PhotoDB] Open blocked — close other tabs with this app open');
   };
 
   request.onsuccess = function(e) {
     photoDB = e.target.result;
+    photoDBReady = true;
+    photoDB.onclose = function() {
+      photoDBReady = false;
+      photoDB = null;
+      console.warn('[PhotoDB] Connection closed');
+    };
+    console.log('[PhotoDB] IndexedDB ready');
     if (callback) callback();
   };
 
   request.onerror = function(e) {
-    console.error('IndexedDB failed to open:', e);
+    photoDBReady = false;
+    photoDB = null;
+    console.error('[PhotoDB] IndexedDB failed to open:', e);
     if (callback) callback();
   };
 }
 
 function savePhotoToDB(photoRecord, callback) {
-  if (!photoDB) { if (callback) callback(); return; }
+  console.log('saving photo to IndexedDB', photoRecord.id);
+  if (!photoDB || !photoDBReady) {
+    console.error('[PhotoDB] savePhotoToDB skipped — IndexedDB not ready', { id: photoRecord.id, photoDBReady: photoDBReady });
+    if (callback) callback(false);
+    return;
+  }
   var tx = photoDB.transaction('photos', 'readwrite');
   var store = tx.objectStore('photos');
-  store.put(photoRecord);
-  tx.oncomplete = function() { if (callback) callback(); };
-  tx.onerror = function(e) { console.error('Photo save error:', e); if (callback) callback(); };
+  var request = store.put(photoRecord);
+  request.onsuccess = function() {
+    console.log('[PhotoDB] put succeeded for id', photoRecord.id);
+  };
+  request.onerror = function(e) {
+    console.error('[PhotoDB] put failed for id', photoRecord.id, e);
+  };
+  tx.oncomplete = function() {
+    console.log('[PhotoDB] transaction complete for id', photoRecord.id);
+    if (callback) callback(true);
+  };
+  tx.onerror = function(e) {
+    console.error('[PhotoDB] transaction error for id', photoRecord.id, e);
+    if (callback) callback(false);
+  };
 }
 
 function getPhotoFromDB(id, callback) {
-  if (!photoDB) { callback(null); return; }
+  console.log('[PhotoDB] getPhotoFromDB', id);
+  if (!photoDB || !photoDBReady) {
+    console.warn('[PhotoDB] getPhotoFromDB skipped — IndexedDB not ready', id);
+    callback(null);
+    return;
+  }
   var tx = photoDB.transaction('photos', 'readonly');
   var store = tx.objectStore('photos');
   var request = store.get(id);
-  request.onsuccess = function() { callback(request.result || null); };
-  request.onerror = function() { callback(null); };
+  request.onsuccess = function() {
+    var result = request.result || null;
+    console.log('[PhotoDB] getPhotoFromDB result', id, result ? 'found' : 'not found');
+    callback(result);
+  };
+  request.onerror = function(e) {
+    console.error('[PhotoDB] getPhotoFromDB error', id, e);
+    callback(null);
+  };
 }
 
 function getPhotosByAuditId(auditId, callback) {
@@ -105,7 +150,10 @@ function load() {
   } catch(e) {}
 }
 function save() {
-  try { localStorage.setItem('aft_current', JSON.stringify(S)); } catch(e) {}
+  console.log('[PhotoDB] save() S.photos metadata:', JSON.parse(JSON.stringify(S.photos)));
+  try { localStorage.setItem('aft_current', JSON.stringify(S)); } catch(e) {
+    console.error('[PhotoDB] localStorage save failed:', e);
+  }
 }
 function getSaved() {
   try { return JSON.parse(localStorage.getItem('aft_saved') || '[]'); } catch(e) { return []; }
@@ -127,6 +175,7 @@ function toast(msg) {
 // ── INIT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   initPhotoDB(function() {
+  console.log('[PhotoDB] App init starting — IndexedDB is ready');
   load();
   fillFields();
   renderHeader();
@@ -140,6 +189,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initCheatsheet();
   initVoice();
   initPhotoInput();
+  initPhotoViewControls();
   initModal();
   initAuditsTab();
   initExportTab();
@@ -324,31 +374,49 @@ function compressImage(dataUrl, callback) {
 
 function initPhotoInput() {
   document.getElementById('photo-input').addEventListener('change', function(e) {
+    if (!photoDBReady) {
+      console.error('[PhotoDB] Photo capture blocked — IndexedDB not ready yet');
+      toast('Photo storage not ready — wait a moment and try again');
+      e.target.value = '';
+      return;
+    }
     var files = Array.from(e.target.files);
-    var room = 33 - S.photos.length;
+    var room = 50 - S.photos.length;
     if (files.length > room) {
-      alert('Only ' + room + ' more photos allowed (33 max).');
+      alert('Only ' + room + ' more photos allowed (50 max).');
       files = files.slice(0, room);
     }
-    var count = 0;
+    if (!files.length) {
+      e.target.value = '';
+      return;
+    }
+    var pending = files.length;
+    var done = 0;
+    function finishBatch() {
+      done++;
+      if (done === pending) {
+        save();
+        renderPhotoList();
+      }
+    }
     files.forEach(function(f) {
       var r = new FileReader();
       r.onload = function(ev) {
         compressImage(ev.target.result, function(compressed) {
-          var id = Date.now() + Math.random();
+          var id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
           var ts = new Date().toISOString();
           var auditId = S.auditId || ('audit-' + Date.now());
           S.auditId = auditId;
 
-          // Save full photo to IndexedDB
-          savePhotoToDB({ id: id, auditId: auditId, dataUrl: compressed, note: '', ts: ts }, function() {
-            // Save only metadata to localStorage state
-            S.photos.push({ id: id, auditId: auditId, note: '', ts: ts });
-            count++;
-            if (count === files.length) {
-              save();
-              renderPhotoList();
+          savePhotoToDB({ id: id, auditId: auditId, dataUrl: compressed, note: '', ts: ts }, function(ok) {
+            if (ok) {
+              S.photos.push({ id: id, auditId: auditId, note: '', ts: ts });
+              console.log('[PhotoDB] Photo metadata added to S.photos, count:', S.photos.length);
+            } else {
+              console.error('[PhotoDB] Photo not added to S.photos — IndexedDB save failed', id);
+              toast('Photo could not be saved — try again');
             }
+            finishBatch();
           });
         });
       };
@@ -358,22 +426,87 @@ function initPhotoInput() {
   });
 }
 
+var photoViewMode = 'grid'; // 'grid' or 'full'
+var selectMode = false;
+var selectedPhotoIds = new Set();
+
 function renderPhotoList() {
   var list = document.getElementById('photo-list');
   var countEl = document.getElementById('photo-count');
   var warnEl = document.getElementById('photo-warn');
   var n = S.photos.length;
 
-  countEl.textContent = n + ' / 33 photos';
-  countEl.className = 'photo-count-display' + (n >= 30 ? ' danger' : n >= 25 ? ' warn' : '');
-  warnEl.style.display = n >= 25 ? 'block' : 'none';
+  countEl.textContent = n + ' / 50 photos';
+  countEl.className = 'photo-count-display' + (n >= 45 ? ' danger' : n >= 38 ? ' warn' : '');
+  warnEl.style.display = n >= 38 ? 'block' : 'none';
 
   if (!n) {
     list.innerHTML = '<div class="empty-msg">No photos yet — tap Add Photo</div>';
     return;
   }
 
-  list.innerHTML = '<div class="empty-msg">Loading photos...</div>';
+  if (photoViewMode === 'grid') {
+    renderGridView(list);
+  } else {
+    renderFullView(list);
+  }
+}
+
+function renderGridView(list) {
+  list.innerHTML = '<div class="empty-msg" style="padding:8px;">Loading...</div>';
+
+  var loaded = 0;
+  var photoData = {};
+
+  if (S.photos.length === 0) { list.innerHTML = ''; return; }
+
+  S.photos.forEach(function(p) {
+    getPhotoFromDB(p.id, function(record) {
+      if (record) photoData[p.id] = record.dataUrl;
+      else if (p.dataUrl) photoData[p.id] = p.dataUrl;
+      loaded++;
+      if (loaded === S.photos.length) buildGrid(list, photoData);
+    });
+  });
+
+  function buildGrid(list, photoData) {
+    var grid = document.createElement('div');
+    grid.className = 'photo-grid';
+
+    S.photos.forEach(function(p, i) {
+      var wrap = document.createElement('div');
+      wrap.className = 'photo-thumb-wrap';
+      wrap.dataset.id = p.id;
+
+      var dataUrl = photoData[p.id] || '';
+      var isSelected = selectedPhotoIds.has(p.id);
+
+      wrap.innerHTML =
+        (dataUrl ? '<img src="' + dataUrl + '" loading="lazy">' : '<div style="width:100%;height:100%;background:#333;display:flex;align-items:center;justify-content:center;color:#666;font-size:1.5rem;">📷</div>') +
+        '<div class="photo-thumb-num">' + (i+1) + '</div>' +
+        (p.note ? '<div class="photo-thumb-note-dot"></div>' : '') +
+        '<div class="photo-thumb-select-overlay' + (isSelected ? ' selected' : '') + '">' +
+          '<div class="photo-thumb-checkmark">✓</div>' +
+        '</div>';
+
+      wrap.addEventListener('click', function() {
+        if (selectMode) {
+          toggleSelectPhoto(p.id, wrap);
+        } else {
+          openModal(p.id);
+        }
+      });
+
+      grid.appendChild(wrap);
+    });
+
+    list.innerHTML = '';
+    list.appendChild(grid);
+  }
+}
+
+function renderFullView(list) {
+  list.innerHTML = '<div class="empty-msg" style="padding:8px;">Loading...</div>';
 
   var loaded = 0;
   var photoData = {};
@@ -383,11 +516,11 @@ function renderPhotoList() {
       if (record) photoData[p.id] = record.dataUrl;
       else if (p.dataUrl) photoData[p.id] = p.dataUrl;
       loaded++;
-      if (loaded === S.photos.length) renderPhotoCards(photoData);
+      if (loaded === S.photos.length) buildFullCards(list, photoData);
     });
   });
 
-  function renderPhotoCards(photoData) {
+  function buildFullCards(list, photoData) {
     list.innerHTML = '';
     S.photos.forEach(function(p, i) {
       var card = document.createElement('div');
@@ -397,7 +530,7 @@ function renderPhotoList() {
 
       card.innerHTML =
         (dataUrl ? '<img src="' + dataUrl + '" loading="lazy" alt="Photo ' + (i+1) + '">' :
-          '<div style="background:#222;padding:20px;text-align:center;color:#666;">📷 Photo ' + (i+1) + '</div>') +
+          '<div style="background:#222;padding:30px;text-align:center;color:#666;font-size:2rem;">📷</div>') +
         '<div class="photo-card-body">' +
           '<div class="photo-card-meta">Photo ' + (i+1) + ' · ' + t + '</div>' +
           '<div class="photo-card-note' + (p.note ? '' : ' empty') + '">' + (p.note || 'No note — tap Edit to add') + '</div>' +
@@ -410,19 +543,179 @@ function renderPhotoList() {
     });
 
     list.querySelectorAll('.edit-photo-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() { openModal(parseFloat(btn.dataset.id)); });
+      btn.addEventListener('click', function() { openModal(Number(btn.dataset.id)); });
     });
     list.querySelectorAll('.del-photo-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         if (confirm('Delete this photo?')) {
-          var id = parseFloat(btn.dataset.id);
+          var id = Number(btn.dataset.id);
           deletePhotoFromDB(id, function() {
             S.photos = S.photos.filter(function(p) { return p.id !== id; });
-            save();
-            renderPhotoList();
+            save(); renderPhotoList();
           });
         }
       });
+    });
+  }
+}
+
+function toggleSelectPhoto(id, wrap) {
+  if (selectedPhotoIds.has(id)) {
+    selectedPhotoIds.delete(id);
+    wrap.querySelector('.photo-thumb-select-overlay').classList.remove('selected');
+  } else {
+    selectedPhotoIds.add(id);
+    wrap.querySelector('.photo-thumb-select-overlay').classList.add('selected');
+  }
+  updateSelectUI();
+}
+
+function updateSelectUI() {
+  var count = selectedPhotoIds.size;
+  var countEl = document.getElementById('select-count');
+  var deleteBar = document.getElementById('delete-bar');
+  if (countEl) countEl.textContent = count + ' selected';
+  if (deleteBar) deleteBar.style.display = count > 0 ? 'block' : 'none';
+}
+
+function enterSelectMode() {
+  selectMode = true;
+  selectedPhotoIds.clear();
+  var toolbar = document.getElementById('select-toolbar');
+  if (toolbar) toolbar.style.display = 'flex';
+  var deleteBar = document.getElementById('delete-bar');
+  if (deleteBar) deleteBar.style.display = 'none';
+  var gridBtn = document.getElementById('btn-view-grid');
+  var fullBtn = document.getElementById('btn-view-full');
+  if (gridBtn) gridBtn.disabled = true;
+  if (fullBtn) fullBtn.disabled = true;
+  renderPhotoList();
+}
+
+function exitSelectMode() {
+  selectMode = false;
+  selectedPhotoIds.clear();
+  var toolbar = document.getElementById('select-toolbar');
+  if (toolbar) toolbar.style.display = 'none';
+  var deleteBar = document.getElementById('delete-bar');
+  if (deleteBar) deleteBar.style.display = 'none';
+  var gridBtn = document.getElementById('btn-view-grid');
+  var fullBtn = document.getElementById('btn-view-full');
+  if (gridBtn) gridBtn.disabled = false;
+  if (fullBtn) fullBtn.disabled = false;
+  renderPhotoList();
+}
+
+function initPhotoViewControls() {
+  var gridBtn = document.getElementById('btn-view-grid');
+  var fullBtn = document.getElementById('btn-view-full');
+
+  if (gridBtn) gridBtn.addEventListener('click', function() {
+    photoViewMode = 'grid';
+    gridBtn.classList.add('active');
+    fullBtn.classList.remove('active');
+    exitSelectMode();
+  });
+
+  if (fullBtn) fullBtn.addEventListener('click', function() {
+    photoViewMode = 'full';
+    fullBtn.classList.add('active');
+    gridBtn.classList.remove('active');
+    exitSelectMode();
+  });
+
+  var selectAllBtn = document.getElementById('btn-select-all');
+  var cancelSelectBtn = document.getElementById('btn-cancel-select');
+  var deleteSelectedBtn = document.getElementById('btn-delete-selected');
+
+  if (selectAllBtn) selectAllBtn.addEventListener('click', function() {
+    if (!selectMode) enterSelectMode();
+    S.photos.forEach(function(p) { selectedPhotoIds.add(p.id); });
+    renderPhotoList();
+    updateSelectUI();
+  });
+
+  if (cancelSelectBtn) cancelSelectBtn.addEventListener('click', exitSelectMode);
+
+  if (deleteSelectedBtn) deleteSelectedBtn.addEventListener('click', function() {
+    if (selectedPhotoIds.size === 0) return;
+    if (!confirm('Delete ' + selectedPhotoIds.size + ' selected photo(s)?')) return;
+
+    var idsToDelete = Array.from(selectedPhotoIds);
+    var deleted = 0;
+
+    idsToDelete.forEach(function(id) {
+      deletePhotoFromDB(id, function() {
+        deleted++;
+        if (deleted === idsToDelete.length) {
+          S.photos = S.photos.filter(function(p) { return !idsToDelete.includes(p.id); });
+          save();
+          exitSelectMode();
+          toast('Deleted ' + idsToDelete.length + ' photo(s)');
+        }
+      });
+    });
+  });
+
+  var photoList = document.getElementById('photo-list');
+  if (photoList) {
+    photoList.addEventListener('pointerdown', function(e) {
+      var wrap = e.target.closest('.photo-thumb-wrap');
+      if (!wrap || selectMode) return;
+      var pressTimer = setTimeout(function() {
+        enterSelectMode();
+        toggleSelectPhoto(Number(wrap.dataset.id), wrap);
+      }, 600);
+      wrap.addEventListener('pointerup', function() { clearTimeout(pressTimer); }, {once:true});
+      wrap.addEventListener('pointermove', function() { clearTimeout(pressTimer); }, {once:true});
+    });
+  }
+
+  var uploadInput = document.getElementById('photo-upload-input');
+  if (uploadInput) {
+    uploadInput.addEventListener('change', function(e) {
+      if (!photoDBReady) {
+        toast('Photo storage not ready — wait a moment and try again');
+        e.target.value = '';
+        return;
+      }
+      var files = Array.from(e.target.files);
+      var room = 50 - S.photos.length;
+      if (files.length > room) { alert('Only ' + room + ' more photos allowed.'); files = files.slice(0, room); }
+      if (!files.length) { e.target.value = ''; return; }
+      var pending = files.length;
+      var done = 0;
+      var added = 0;
+      function finishBatch() {
+        done++;
+        if (done === pending) {
+          save();
+          renderPhotoList();
+          if (added) toast(added + ' photo(s) added');
+        }
+      }
+      files.forEach(function(f) {
+        var r = new FileReader();
+        r.onload = function(ev) {
+          compressImage(ev.target.result, function(compressed) {
+            var id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+            var ts = new Date().toISOString();
+            var auditId = S.auditId || ('audit-' + Date.now());
+            S.auditId = auditId;
+            savePhotoToDB({ id: id, auditId: auditId, dataUrl: compressed, note: '', ts: ts }, function(ok) {
+              if (ok) {
+                S.photos.push({ id: id, auditId: auditId, note: '', ts: ts });
+                added++;
+              } else {
+                toast('Photo could not be saved — try again');
+              }
+              finishBatch();
+            });
+          });
+        };
+        r.readAsDataURL(f);
+      });
+      e.target.value = '';
     });
   }
 }

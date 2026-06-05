@@ -172,15 +172,38 @@
 <div id="tab-photos" class="tabpanel" style="display:none">
 
   <section class="card">
-    <div class="row-between">
-      <div class="photo-count-display" id="photo-count">0 / 33 photos</div>
-      <label class="btn-gold photo-label">
+    <div class="row-between" style="margin-bottom:8px;">
+      <div class="photo-count-display" id="photo-count">0 / 50 photos</div>
+      <button class="btn-sm" id="btn-enter-select" onclick="enterSelectMode()" style="margin-right:4px;">Select</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-sm photo-view-btn active" id="btn-view-grid">⊞ Grid</button>
+        <button class="btn-sm photo-view-btn" id="btn-view-full">☰ Full</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:6px;">
+      <label class="btn-gold photo-label" style="flex:1;text-align:center;">
         📷 Add Photo
         <input type="file" id="photo-input" accept="image/*" capture="environment" multiple style="display:none">
       </label>
+      <label class="btn-outline photo-label" style="flex:1;text-align:center;">
+        📁 Upload
+        <input type="file" id="photo-upload-input" accept="image/*" multiple style="display:none">
+      </label>
     </div>
-    <div class="photo-warn" id="photo-warn" style="display:none">⚠️ Approaching 33 photo limit — delete duplicates</div>
+    <div class="photo-warn" id="photo-warn" style="display:none">⚠️ Approaching 50 photo limit — delete duplicates</div>
   </section>
+
+  <!-- SELECT MODE TOOLBAR -->
+  <div id="select-toolbar" class="select-toolbar" style="display:none;">
+    <button class="btn-sm" id="btn-select-all">Select All</button>
+    <span id="select-count" class="select-count">0 selected</span>
+    <button class="btn-sm" id="btn-cancel-select">Cancel</button>
+  </div>
+
+  <!-- DELETE SELECTED BAR -->
+  <div id="delete-bar" class="delete-bar" style="display:none;">
+    <button class="btn-danger btn-full" id="btn-delete-selected">🗑 Delete Selected</button>
+  </div>
 
   <div id="photo-list"></div>
 

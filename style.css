@@ -582,3 +582,115 @@ select.field { cursor: pointer; }
   margin-bottom: 8px;
   text-align: center;
 }
+
+/* ============================================================
+   PHOTOS TAB — GRID/FULL VIEW + SELECT MODE
+   ============================================================ */
+.photo-view-btn {
+  background: var(--bg3);
+  color: var(--sub);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.photo-view-btn.active {
+  background: var(--gold);
+  color: #111;
+  border-color: var(--gold);
+  font-weight: 700;
+}
+
+/* GRID VIEW */
+.photo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+}
+.photo-thumb-wrap {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #222;
+}
+.photo-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-thumb-num {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.photo-thumb-note-dot {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  background: #4caf50;
+  border-radius: 50%;
+  border: 1px solid #fff;
+}
+.photo-thumb-select-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(201,168,76,0.35);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.photo-thumb-select-overlay.selected {
+  display: flex;
+}
+.photo-thumb-checkmark {
+  width: 28px;
+  height: 28px;
+  background: var(--gold);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: #111;
+  font-weight: 700;
+}
+
+/* SELECT TOOLBAR */
+.select-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg2);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 4px 8px;
+}
+.select-count {
+  font-size: 0.88rem;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* DELETE BAR */
+.delete-bar {
+  position: sticky;
+  bottom: 0;
+  padding: 10px;
+  background: var(--bg);
+  border-top: 1px solid var(--danger);
+  z-index: 50;
+}

@@ -1,4 +1,4 @@
-const CACHE = 'aft-v5';
+const CACHE = 'aft-v7';
 const FILES = ['index.html','style.css','script.js','manifest.json'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
