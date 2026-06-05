@@ -11,5 +11,9 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  e.respondWith(
+    e.request.url.includes('script.js')
+      ? fetch(e.request)
+      : caches.match(e.request).then(r => r || fetch(e.request))
+  );
 });
